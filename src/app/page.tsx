@@ -1,6 +1,6 @@
 "use client";
 
-import { OEM, PSM, type Worker as TesseractWorker } from "tesseract.js";
+import type { Worker as TesseractWorker } from "tesseract.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type VehicleData = Record<string, string | number | boolean | null>;
@@ -82,47 +82,6 @@ export default function Home() {
   const normalizePlate = (value: string) =>
     value.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-  const preprocessImage = (dataUrl: string) =>
-    new Promise<string>((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const maxWidth = 1600;
-        const scale = img.width < maxWidth ? maxWidth / img.width : 1;
-        const width = Math.round(img.width * scale);
-        const height = Math.round(img.height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const context = canvas.getContext("2d");
-        if (!context) {
-          resolve(dataUrl);
-          return;
-        }
-        context.drawImage(img, 0, 0, width, height);
-        const imageData = context.getImageData(0, 0, width, height);
-        const data = imageData.data;
-        let total = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        }
-        const avg = total / (data.length / 4);
-        const contrast = 1.4;
-        const bias = avg < 120 ? 12 : 0;
-        for (let i = 0; i < data.length; i += 4) {
-          const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-          let adjusted = (lum - 128) * contrast + 128 + bias;
-          adjusted = Math.max(0, Math.min(255, adjusted));
-          data[i] = adjusted;
-          data[i + 1] = adjusted;
-          data[i + 2] = adjusted;
-        }
-        context.putImageData(imageData, 0, 0);
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.onerror = () => resolve(dataUrl);
-      img.src = dataUrl;
-    });
-
   const extractPlate = (rawText: string) => {
     const cleaned = rawText.toUpperCase().replace(/[^A-Z0-9]/g, " ");
     const condensed = cleaned.replace(/\s+/g, "");
@@ -153,10 +112,6 @@ export default function Home() {
     });
     await worker.setParameters?.({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-      tessedit_ocr_engine_mode: `${OEM.LSTM_ONLY}`,
-      preserve_interword_spaces: "1",
-      user_defined_dpi: "300",
     });
 
     ocrWorkerRef.current = worker;
@@ -201,11 +156,7 @@ export default function Home() {
       return;
     }
     if (snapshot) {
-      const processed = await preprocessImage(snapshot);
-      let ocrResult = normalizePlate(await runOcr(processed));
-      if (!ocrResult) {
-        ocrResult = normalizePlate(await runOcr(snapshot));
-      }
+      const ocrResult = normalizePlate(await runOcr(snapshot));
       if (ocrResult) {
         setDetectedPlate(ocrResult);
         setPlateInput(ocrResult);
