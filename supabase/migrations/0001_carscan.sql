@@ -58,7 +58,8 @@ create policy "carscan_vehicles_select_own"
   using (user_id = auth.uid()::text);
 
 -- Table grants for authenticated users (RLS still applies).
-grant insert, select on table public.carscan_vehicles to authenticated;
+revoke all on table public.carscan_vehicles from anon, authenticated;
+grant select, insert, update, delete on table public.carscan_vehicles to anon, authenticated;
 
 -- Storage bucket for images.
 insert into storage.buckets (id, name, public)

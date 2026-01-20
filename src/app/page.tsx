@@ -5,6 +5,7 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import * as ort from "onnxruntime-web";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 type VehicleData = Record<string, string | number | boolean | null>;
 
@@ -48,6 +49,8 @@ export default function Home() {
     "idle"
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
   useEffect(() => {
@@ -615,6 +618,9 @@ export default function Home() {
     setSaveError(null);
     try {
       const token = localStorage.getItem("supabaseAccessToken") ?? "";
+      if (!token) {
+        throw new Error("Please sign in to save.");
+      }
       const response = await fetch("/api/save", {
         method: "POST",
         headers: {
@@ -639,6 +645,11 @@ export default function Home() {
       setSaveStatus("error");
       setSaveError(error instanceof Error ? error.message : "Save failed.");
     }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUserEmail(null);
   };
 
   const requestLocation = () => {
@@ -695,6 +706,32 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const email = data.session?.user?.email ?? null;
+      setUserEmail(email);
+      if (data.session?.access_token) {
+        localStorage.setItem("supabaseAccessToken", data.session.access_token);
+      }
+      setAuthReady(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const email = session?.user?.email ?? null;
+      setUserEmail(email);
+      if (session?.access_token) {
+        localStorage.setItem("supabaseAccessToken", session.access_token);
+      } else {
+        localStorage.removeItem("supabaseAccessToken");
+      }
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
   return (
     <div className="relative min-h-screen overflow-hidden px-6 py-10 text-slate-900">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(249,115,22,0.15),transparent_55%),radial-gradient(circle_at_80%_0%,rgba(56,189,248,0.18),transparent_45%)]" />
@@ -713,12 +750,27 @@ export default function Home() {
               </h1>
             </div>
             <nav className="ml-auto flex items-center gap-4 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
-              <Link className="hover:text-slate-900" href="/auth/sign-in">
-                Sign In
-              </Link>
-              <Link className="hover:text-slate-900" href="/auth/sign-up">
-                Sign Up
-              </Link>
+              {authReady && userEmail ? (
+                <>
+                  <span className="text-slate-600">{userEmail}</span>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="hover:text-slate-900"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link className="hover:text-slate-900" href="/auth/sign-in">
+                    Sign In
+                  </Link>
+                  <Link className="hover:text-slate-900" href="/auth/sign-up">
+                    Sign Up
+                  </Link>
+                </>
+              )}
             </nav>
           </div>
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
