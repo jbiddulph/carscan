@@ -156,7 +156,7 @@ export default function Home() {
     }
     return {
       input,
-      type: useUint8 ? "uint8" : "float32",
+      type: useUint8 ? ("uint8" as const) : ("float32" as const),
       scale,
       padX,
       padY,
