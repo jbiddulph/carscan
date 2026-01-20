@@ -290,33 +290,10 @@ export default function Home() {
     return canvas.toDataURL("image/png");
   };
 
-  const prepareOcrInput = (
-    image: HTMLImageElement,
-    useUint8: boolean,
-    dims: Array<number | string> | undefined
-  ) => {
+  const prepareOcrInput = (image: HTMLImageElement, useUint8: boolean) => {
     const targetWidth = OCR_INPUT.width;
     const targetHeight = OCR_INPUT.height;
-    const dimsNums = Array.isArray(dims) ? dims.map((d) => Number(d)) : [];
-    const nhwcByDims =
-      dimsNums.length === 4 &&
-      dimsNums[1] === targetHeight &&
-      dimsNums[2] === targetWidth;
-    const nchwByDims =
-      dimsNums.length === 4 &&
-      dimsNums[2] === targetHeight &&
-      dimsNums[3] === targetWidth;
-    const nhwc =
-      nhwcByDims ||
-      (!nchwByDims && dimsNums.length === 4 && dimsNums[3] === 1) ||
-      (!nchwByDims && dimsNums.length === 4 && Number.isNaN(dimsNums[1]));
-    const channels = nhwc
-      ? dimsNums[3] === 1 || dimsNums[3] === 3
-        ? dimsNums[3]
-        : 1
-      : dimsNums[1] === 1 || dimsNums[1] === 3
-      ? dimsNums[1]
-      : 3;
+    const channels = 1;
     const canvas = document.createElement("canvas");
     canvas.width = targetWidth;
     canvas.height = targetHeight;
@@ -335,31 +312,22 @@ export default function Home() {
     ctx.drawImage(image, padX, padY, scaledWidth, scaledHeight);
     const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
     const pixelCount = targetWidth * targetHeight;
-    const channelCount = channels === 1 ? 1 : 3;
     const input = useUint8
-      ? new Uint8Array(channelCount * pixelCount)
-      : new Float32Array(channelCount * pixelCount);
+      ? new Uint8Array(channels * pixelCount)
+      : new Float32Array(channels * pixelCount);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const idx = i / 4;
       const r = imageData.data[i];
       const g = imageData.data[i + 1];
       const b = imageData.data[i + 2];
       const toValue = (value: number) => (useUint8 ? value : value / 255);
-      if (channelCount === 1) {
-        const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-        input[idx] = toValue(gray);
-      } else if (nhwc) {
-        const base = idx * 3;
-        input[base] = toValue(r);
-        input[base + 1] = toValue(g);
-        input[base + 2] = toValue(b);
-      } else {
-        input[idx] = toValue(r);
-        input[idx + pixelCount] = toValue(g);
-        input[idx + 2 * pixelCount] = toValue(b);
-      }
+      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+      input[idx] = toValue(gray);
     }
-    return { input, nhwc, channelCount, targetWidth, targetHeight };
+    return {
+      input,
+      shape: [1, targetHeight, targetWidth, 1] as const,
+    };
   };
 
   const extractPlate = (rawText: string) => {
@@ -438,23 +406,17 @@ export default function Home() {
         throw new Error("Unable to read image.");
       }
       const session = await getOcrSession();
-      const ocrMeta = session.inputMetadata[0] as {
-        type?: string;
-        dimensions?: Array<number | string>;
-      };
+      const ocrMeta = session.inputMetadata[0] as { type?: string };
       const ocrUseUint8 = ocrMeta?.type?.includes("uint8") ?? false;
-      const prepared = prepareOcrInput(image, ocrUseUint8, ocrMeta?.dimensions);
+      const prepared = prepareOcrInput(image, ocrUseUint8);
       if (!prepared) {
         throw new Error("Unable to prepare OCR input.");
       }
       const inputName = session.inputNames[0];
-      const shape = prepared.nhwc
-        ? [1, prepared.targetHeight, prepared.targetWidth, prepared.channelCount]
-        : [1, prepared.channelCount, prepared.targetHeight, prepared.targetWidth];
       const tensor = new ort.Tensor(
         ocrUseUint8 ? "uint8" : "float32",
         prepared.input,
-        shape
+        prepared.shape
       );
       const results = await session.run({ [inputName]: tensor });
       const output = results[session.outputNames[0]] as ort.Tensor;
