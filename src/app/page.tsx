@@ -297,12 +297,26 @@ export default function Home() {
   ) => {
     const targetWidth = OCR_INPUT.width;
     const targetHeight = OCR_INPUT.height;
+    const dimsNums = Array.isArray(dims) ? dims.map((d) => Number(d)) : [];
+    const nhwcByDims =
+      dimsNums.length === 4 &&
+      dimsNums[1] === targetHeight &&
+      dimsNums[2] === targetWidth;
+    const nchwByDims =
+      dimsNums.length === 4 &&
+      dimsNums[2] === targetHeight &&
+      dimsNums[3] === targetWidth;
     const nhwc =
-      Array.isArray(dims) &&
-      dims.length === 4 &&
-      Number(dims[1]) === targetHeight &&
-      Number(dims[2]) === targetWidth;
-    const channels = nhwc ? Number(dims?.[3] ?? 1) : Number(dims?.[1] ?? 3);
+      nhwcByDims ||
+      (!nchwByDims && dimsNums.length === 4 && dimsNums[3] === 1) ||
+      (!nchwByDims && dimsNums.length === 4 && Number.isNaN(dimsNums[1]));
+    const channels = nhwc
+      ? dimsNums[3] === 1 || dimsNums[3] === 3
+        ? dimsNums[3]
+        : 1
+      : dimsNums[1] === 1 || dimsNums[1] === 3
+      ? dimsNums[1]
+      : 3;
     const canvas = document.createElement("canvas");
     canvas.width = targetWidth;
     canvas.height = targetHeight;
