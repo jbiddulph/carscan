@@ -107,8 +107,8 @@ export default function Home() {
     });
     await worker.setParameters?.({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      tessedit_pageseg_mode: "7",
-      tessedit_ocr_engine_mode: "1",
+      tessedit_pageseg_mode: 7,
+      tessedit_ocr_engine_mode: 1,
       user_defined_dpi: "300",
     });
 
