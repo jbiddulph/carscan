@@ -564,7 +564,7 @@ export default function Home() {
     const lines = Object.entries(infoData).map(
       ([key, value]) => `${formatLabel(key)}: ${String(value)}`
     );
-    return `Vehicle details\\n${lines.join("\\n")}`;
+    return `Vehicle details\n${lines.join("\n")}`;
   }, [infoData]);
 
   const handleShare = async () => {
