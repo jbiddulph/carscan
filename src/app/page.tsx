@@ -5,20 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type VehicleData = Record<string, string | number | boolean | null>;
 
-const samplePlates = ["LM22 XPT", "KX19 LYR", "WG70 RVF", "BK68 YTU"];
-
-const mockVehicleData: VehicleData = {
-  registration: "LM22 XPT",
-  make: "Volkswagen",
-  model: "Golf",
-  color: "Deep Blue Pearl",
-  fuelType: "Petrol",
-  registrationDate: "2022-03-14",
-  taxStatus: "Taxed",
-  motStatus: "Valid",
-  co2Emissions: "116 g/km",
-};
-
 const formatLabel = (value: string) =>
   value
     .replace(/([A-Z])/g, " $1")
@@ -90,7 +76,7 @@ export default function Home() {
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.9);
+    return canvas.toDataURL("image/jpeg", 0.95);
   };
 
   const normalizePlate = (value: string) =>
@@ -121,6 +107,9 @@ export default function Home() {
     });
     await worker.setParameters?.({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+      tessedit_pageseg_mode: "7",
+      tessedit_ocr_engine_mode: "1",
+      user_defined_dpi: "300",
     });
 
     ocrWorkerRef.current = worker;
@@ -172,10 +161,6 @@ export default function Home() {
         return;
       }
     }
-    const fallback = samplePlates[Math.floor(Math.random() * samplePlates.length)];
-    const normalizedFallback = normalizePlate(fallback);
-    setDetectedPlate(normalizedFallback);
-    setPlateInput(normalizedFallback);
   };
 
   const handleLookup = async () => {
@@ -206,7 +191,7 @@ export default function Home() {
       setVehicleData(payload);
       setLookupStatus("success");
     } catch (error) {
-      setVehicleData(mockVehicleData);
+      setVehicleData(null);
       setLookupStatus("error");
       setLookupError(error instanceof Error ? error.message : "Lookup failed.");
     }
@@ -215,9 +200,6 @@ export default function Home() {
   const infoData = useMemo(() => {
     if (lookupStatus === "success" && vehicleData) {
       return vehicleData;
-    }
-    if (lookupStatus === "error") {
-      return mockVehicleData;
     }
     return null;
   }, [lookupStatus, vehicleData]);
@@ -245,9 +227,6 @@ export default function Home() {
               Point your camera at a registration plate, detect the text, and pull
               DVLA VES vehicle details in seconds.
             </p>
-            <div className="rounded-full bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 shadow-sm">
-              Live demo mode
-            </div>
           </div>
         </header>
 
@@ -401,8 +380,8 @@ export default function Home() {
               How it works
             </h2>
             <p className="mt-2 text-sm text-slate-500">
-              This layout is ready for a real-time OCR pipeline and DVLA VES
-              integration.
+              Capture the plate, validate OCR, and trigger DVLA VES lookup when
+              the registration is confirmed.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-3">
