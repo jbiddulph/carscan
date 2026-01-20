@@ -446,7 +446,7 @@ export default function Home() {
         };
         const inputHeight = Number(inputMeta?.dimensions?.[2]) || 640;
         const inputWidth = Number(inputMeta?.dimensions?.[3]) || 640;
-        const prepared = prepareDetectorInput(image, inputWidth, inputHeight, true);
+        const prepared = prepareDetectorInput(image, inputWidth, inputHeight, false);
         if (!prepared) {
           throw new Error("Unable to prepare detector input.");
         }
