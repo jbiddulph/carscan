@@ -1,5 +1,6 @@
 "use client";
 
+import type { Worker as TesseractWorker } from "tesseract.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type VehicleData = Record<string, string | number | boolean | null>;
@@ -27,11 +28,7 @@ const formatLabel = (value: string) =>
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ocrWorkerRef = useRef<{
-    recognize: (image: string) => Promise<{ data: { text?: string; confidence?: number } }>;
-    terminate: () => Promise<void>;
-    setParameters?: (params: Record<string, string>) => Promise<void>;
-  } | null>(null);
+  const ocrWorkerRef = useRef<TesseractWorker | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
