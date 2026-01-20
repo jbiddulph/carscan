@@ -21,17 +21,44 @@ create index if not exists carscan_vehicles_created_at_idx on public.carscan_veh
 alter table public.carscan_vehicles enable row level security;
 
 -- Authenticated users can insert and read their own rows.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'carscan_vehicles'
+      and policyname = 'carscan_vehicles_insert_own'
+  ) then
+    execute 'drop policy "carscan_vehicles_insert_own" on public.carscan_vehicles';
+  end if;
+end $$;
 create policy "carscan_vehicles_insert_own"
   on public.carscan_vehicles
   for insert
   to authenticated
   with check (user_id = auth.uid()::text);
 
+do $$
+begin
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'carscan_vehicles'
+      and policyname = 'carscan_vehicles_select_own'
+  ) then
+    execute 'drop policy "carscan_vehicles_select_own" on public.carscan_vehicles';
+  end if;
+end $$;
 create policy "carscan_vehicles_select_own"
   on public.carscan_vehicles
   for select
   to authenticated
   using (user_id = auth.uid()::text);
+
+-- Table grants for authenticated users (RLS still applies).
+grant insert, select on table public.carscan_vehicles to authenticated;
 
 -- Storage bucket for images.
 insert into storage.buckets (id, name, public)
@@ -39,6 +66,18 @@ values ('carscan', 'carscan', false)
 on conflict (id) do nothing;
 
 -- Allow authenticated users to read their own files under carscan/<user_id>/.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'carscan_storage_read_own'
+  ) then
+    execute 'drop policy "carscan_storage_read_own" on storage.objects';
+  end if;
+end $$;
 create policy "carscan_storage_read_own"
   on storage.objects
   for select
@@ -49,6 +88,18 @@ create policy "carscan_storage_read_own"
   );
 
 -- Allow authenticated users to upload/update/delete their own files under carscan/<user_id>/.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'carscan_storage_insert_own'
+  ) then
+    execute 'drop policy "carscan_storage_insert_own" on storage.objects';
+  end if;
+end $$;
 create policy "carscan_storage_insert_own"
   on storage.objects
   for insert
@@ -58,6 +109,18 @@ create policy "carscan_storage_insert_own"
     and split_part(name, '/', 2) = auth.uid()::text
   );
 
+do $$
+begin
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'carscan_storage_update_own'
+  ) then
+    execute 'drop policy "carscan_storage_update_own" on storage.objects';
+  end if;
+end $$;
 create policy "carscan_storage_update_own"
   on storage.objects
   for update
@@ -71,6 +134,18 @@ create policy "carscan_storage_update_own"
     and split_part(name, '/', 2) = auth.uid()::text
   );
 
+do $$
+begin
+  if exists (
+    select 1
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'carscan_storage_delete_own'
+  ) then
+    execute 'drop policy "carscan_storage_delete_own" on storage.objects';
+  end if;
+end $$;
 create policy "carscan_storage_delete_own"
   on storage.objects
   for delete
