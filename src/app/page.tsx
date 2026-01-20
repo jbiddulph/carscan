@@ -16,6 +16,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const detectorSessionRef = useRef<ort.InferenceSession | null>(null);
   const ocrSessionRef = useRef<ort.InferenceSession | null>(null);
+  const ocrTimeoutRef = useRef<number | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
@@ -75,6 +76,13 @@ export default function Home() {
 
   const normalizePlate = (value: string) =>
     value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  const clearOcrTimeout = () => {
+    if (ocrTimeoutRef.current !== null) {
+      window.clearTimeout(ocrTimeoutRef.current);
+      ocrTimeoutRef.current = null;
+    }
+  };
 
   const OCR_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_";
   const OCR_PAD = "_";
@@ -425,14 +433,17 @@ export default function Home() {
       if (!plate) {
         setOcrStatus("error");
         setOcrError("No plate detected. Try again with a clearer shot.");
+        clearOcrTimeout();
         return "";
       }
       setOcrStatus("success");
       setOcrConfidence(decoded.confidence ?? null);
+      clearOcrTimeout();
       return plate;
     } catch (error) {
       setOcrStatus("error");
       setOcrError(error instanceof Error ? error.message : "OCR failed.");
+      clearOcrTimeout();
       return "";
     }
   };
@@ -448,6 +459,11 @@ export default function Home() {
     if (snapshot) {
       setOcrStatus("loading");
       setOcrError(null);
+      clearOcrTimeout();
+      ocrTimeoutRef.current = window.setTimeout(() => {
+        setOcrStatus("error");
+        setOcrError("Scan timed out. Please try again.");
+      }, 15000);
       try {
         const image = await loadImageElement(snapshot);
         if (!image) {
@@ -497,6 +513,7 @@ export default function Home() {
       } catch (error) {
         setOcrStatus("error");
         setOcrError(error instanceof Error ? error.message : "Plate scan failed.");
+        clearOcrTimeout();
       }
     }
   };
@@ -541,6 +558,31 @@ export default function Home() {
     }
     return null;
   }, [lookupStatus, vehicleData]);
+
+  const shareText = useMemo(() => {
+    if (!infoData) return "";
+    const lines = Object.entries(infoData).map(
+      ([key, value]) => `${formatLabel(key)}: ${String(value)}`
+    );
+    return `Vehicle details\\n${lines.join("\\n")}`;
+  }, [infoData]);
+
+  const handleShare = async () => {
+    if (!shareText) return;
+    const url = typeof window !== "undefined" ? window.location.href : "";
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Vehicle details",
+          text: shareText,
+          url,
+        });
+        return;
+      } catch {
+        return;
+      }
+    }
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden px-6 py-10 text-slate-900">
@@ -708,6 +750,49 @@ export default function Home() {
                   Run a lookup to populate DVLA VES results.
                 </p>
               )}
+              {infoData ? (
+                <div className="mt-6 grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className="h-11 w-full rounded-full bg-slate-900 text-xs font-semibold uppercase tracking-[0.3em] text-white"
+                  >
+                    Share
+                  </button>
+                  <a
+                    className="grid h-11 w-full place-items-center rounded-full border border-slate-300 text-xs font-semibold uppercase tracking-[0.3em] text-slate-700"
+                    href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    WhatsApp
+                  </a>
+                  <a
+                    className="grid h-11 w-full place-items-center rounded-full border border-slate-300 text-xs font-semibold uppercase tracking-[0.3em] text-slate-700"
+                    href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(
+                      typeof window !== "undefined" ? window.location.href : ""
+                    )}&quote=${encodeURIComponent(shareText)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Facebook
+                  </a>
+                  <a
+                    className="grid h-11 w-full place-items-center rounded-full border border-slate-300 text-xs font-semibold uppercase tracking-[0.3em] text-slate-700"
+                    href={`sms:?body=${encodeURIComponent(shareText)}`}
+                  >
+                    Text
+                  </a>
+                  <a
+                    className="grid h-11 w-full place-items-center rounded-full border border-slate-300 text-xs font-semibold uppercase tracking-[0.3em] text-slate-700 sm:col-span-2"
+                    href={`mailto:?subject=${encodeURIComponent(
+                      "Vehicle details"
+                    )}&body=${encodeURIComponent(shareText)}`}
+                  >
+                    Email
+                  </a>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
