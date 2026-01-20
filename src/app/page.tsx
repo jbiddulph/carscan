@@ -290,7 +290,7 @@ export default function Home() {
     return canvas.toDataURL("image/png");
   };
 
-  const prepareOcrInput = (image: HTMLImageElement) => {
+  const prepareOcrInput = (image: HTMLImageElement, useUint8: boolean) => {
     const canvas = document.createElement("canvas");
     canvas.width = OCR_INPUT.width;
     canvas.height = OCR_INPUT.height;
@@ -308,12 +308,22 @@ export default function Home() {
     ctx.fillRect(0, 0, OCR_INPUT.width, OCR_INPUT.height);
     ctx.drawImage(image, padX, padY, scaledWidth, scaledHeight);
     const imageData = ctx.getImageData(0, 0, OCR_INPUT.width, OCR_INPUT.height);
-    const input = new Float32Array(3 * OCR_INPUT.width * OCR_INPUT.height);
+    const input = useUint8
+      ? new Uint8Array(3 * OCR_INPUT.width * OCR_INPUT.height)
+      : new Float32Array(3 * OCR_INPUT.width * OCR_INPUT.height);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const idx = i / 4;
-      input[idx] = imageData.data[i] / 255;
-      input[idx + OCR_INPUT.width * OCR_INPUT.height] = imageData.data[i + 1] / 255;
-      input[idx + 2 * OCR_INPUT.width * OCR_INPUT.height] = imageData.data[i + 2] / 255;
+      if (useUint8) {
+        input[idx] = imageData.data[i];
+        input[idx + OCR_INPUT.width * OCR_INPUT.height] = imageData.data[i + 1];
+        input[idx + 2 * OCR_INPUT.width * OCR_INPUT.height] = imageData.data[i + 2];
+      } else {
+        input[idx] = imageData.data[i] / 255;
+        input[idx + OCR_INPUT.width * OCR_INPUT.height] =
+          imageData.data[i + 1] / 255;
+        input[idx + 2 * OCR_INPUT.width * OCR_INPUT.height] =
+          imageData.data[i + 2] / 255;
+      }
     }
     return input;
   };
@@ -394,13 +404,15 @@ export default function Home() {
         throw new Error("Unable to read image.");
       }
       const session = await getOcrSession();
-      const input = prepareOcrInput(image);
+      const ocrMeta = session.inputMetadata[0] as { type?: string };
+      const ocrUseUint8 = ocrMeta?.type?.includes("uint8") ?? false;
+      const input = prepareOcrInput(image, ocrUseUint8);
       if (!input) {
         throw new Error("Unable to prepare OCR input.");
       }
       const inputName = session.inputNames[0];
       const tensor = new ort.Tensor(
-        "float32",
+        ocrUseUint8 ? "uint8" : "float32",
         input,
         [1, 3, OCR_INPUT.height, OCR_INPUT.width]
       );
