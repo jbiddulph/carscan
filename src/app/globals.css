@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0f172a;
+  --ink-muted: #334155;
+  --panel: #f8f6f1;
+  --panel-strong: #f1ebe0;
+  --accent: #f97316;
+  --accent-strong: #ea580c;
+  --sky: #dff1ff;
+  --navy: #0b132b;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --color-background: var(--panel);
+  --color-foreground: var(--ink);
+}
+
+body {
+  background: radial-gradient(circle at 10% 10%, #fff6e8 0%, #f7f2ea 35%, #e8f4ff 100%);
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.7s ease-out both;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.7s ease-out both;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
