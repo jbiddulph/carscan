@@ -84,6 +84,11 @@ export default function Home() {
 
   const extractPlate = (rawText: string) => {
     const cleaned = rawText.toUpperCase().replace(/[^A-Z0-9]/g, " ");
+    const condensed = cleaned.replace(/\s+/g, "");
+    const strict = condensed.match(/[A-Z]{2}\d{2}[A-Z]{3}/);
+    if (strict) return strict[0];
+    const loose = condensed.match(/[A-Z0-9]{5,8}/);
+    if (loose) return loose[0];
     const candidates = cleaned.split(/\s+/).filter(Boolean);
     return (
       candidates.find((candidate) => /^[A-Z]{2}\d{2}[A-Z]{3}$/.test(candidate)) ||
@@ -107,8 +112,9 @@ export default function Home() {
     });
     await worker.setParameters?.({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      tessedit_pageseg_mode: PSM.SINGLE_LINE,
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
       tessedit_ocr_engine_mode: `${OEM.LSTM_ONLY}`,
+      preserve_interword_spaces: "1",
       user_defined_dpi: "300",
     });
 
