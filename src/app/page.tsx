@@ -1,6 +1,6 @@
 "use client";
 
-import { OEM, PSM, type Worker as TesseractWorker } from "tesseract.js";
+import * as ort from "onnxruntime-web";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type VehicleData = Record<string, string | number | boolean | null>;
@@ -14,7 +14,8 @@ const formatLabel = (value: string) =>
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ocrWorkerRef = useRef<TesseractWorker | null>(null);
+  const detectorSessionRef = useRef<ort.InferenceSession | null>(null);
+  const ocrSessionRef = useRef<ort.InferenceSession | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
@@ -23,7 +24,6 @@ export default function Home() {
   const [ocrStatus, setOcrStatus] = useState<"idle" | "loading" | "success" | "error">(
     "idle"
   );
-  const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
   const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -58,12 +58,6 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
-    return () => {
-      ocrWorkerRef.current?.terminate().catch(() => null);
-    };
-  }, []);
-
   const captureFrame = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -82,240 +76,232 @@ export default function Home() {
   const normalizePlate = (value: string) =>
     value.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-  const loadImageData = (dataUrl: string) =>
-    new Promise<ImageData | null>((resolve) => {
+  const OCR_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+  const OCR_PAD = "_";
+  const OCR_INPUT = { width: 140, height: 70, maxSlots: 9 };
+
+  const loadImageElement = (dataUrl: string) =>
+    new Promise<HTMLImageElement | null>((resolve) => {
       const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const context = canvas.getContext("2d");
-        if (!context) {
-          resolve(null);
-          return;
-        }
-        context.drawImage(img, 0, 0);
-        resolve(context.getImageData(0, 0, canvas.width, canvas.height));
-      };
+      img.onload = () => resolve(img);
       img.onerror = () => resolve(null);
       img.src = dataUrl;
     });
 
-  const detectPlateCrop = (imageData: ImageData) => {
-    const maxWidth = 640;
-    const scale = imageData.width > maxWidth ? maxWidth / imageData.width : 1;
-    const width = Math.round(imageData.width * scale);
-    const height = Math.round(imageData.height * scale);
-    const smallCanvas = document.createElement("canvas");
-    smallCanvas.width = width;
-    smallCanvas.height = height;
-    const smallCtx = smallCanvas.getContext("2d");
-    if (!smallCtx) return null;
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = imageData.width;
-    tempCanvas.height = imageData.height;
-    const tempCtx = tempCanvas.getContext("2d");
-    if (!tempCtx) return null;
-    tempCtx.putImageData(imageData, 0, 0);
-    smallCtx.drawImage(tempCanvas, 0, 0, width, height);
-    const smallData = smallCtx.getImageData(0, 0, width, height);
-    const gray = new Uint8ClampedArray(width * height);
-    for (let i = 0; i < smallData.data.length; i += 4) {
-      gray[i / 4] =
-        0.299 * smallData.data[i] +
-        0.587 * smallData.data[i + 1] +
-        0.114 * smallData.data[i + 2];
+  const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
+
+  const configureOrt = () => {
+    if (!ort.env.wasm.wasmPaths) {
+      ort.env.wasm.wasmPaths = "/ort/";
     }
-    const edges = new Uint8Array(width * height);
-    const threshold = 120;
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        const idx = y * width + x;
-        const gx =
-          -gray[idx - width - 1] -
-          2 * gray[idx - 1] -
-          gray[idx + width - 1] +
-          gray[idx - width + 1] +
-          2 * gray[idx + 1] +
-          gray[idx + width + 1];
-        const gy =
-          -gray[idx - width - 1] -
-          2 * gray[idx - width] -
-          gray[idx - width + 1] +
-          gray[idx + width - 1] +
-          2 * gray[idx + width] +
-          gray[idx + width + 1];
-        const mag = Math.sqrt(gx * gx + gy * gy);
-        edges[idx] = mag > threshold ? 1 : 0;
-      }
+    ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
+  };
+
+  const getDetectorSession = async () => {
+    if (detectorSessionRef.current) {
+      return detectorSessionRef.current;
     }
-    const visited = new Uint8Array(width * height);
-    let best: { x: number; y: number; w: number; h: number; area: number } | null =
-      null;
-    const minArea = width * height * 0.01;
-    for (let i = 0; i < edges.length; i += 1) {
-      if (!edges[i] || visited[i]) continue;
-      const stack = [i];
-      visited[i] = 1;
-      let minX = width;
-      let minY = height;
-      let maxX = 0;
-      let maxY = 0;
-      let count = 0;
-      while (stack.length) {
-        const idx = stack.pop() ?? 0;
-        const x = idx % width;
-        const y = Math.floor(idx / width);
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-        count += 1;
-        const neighbors = [
-          idx - 1,
-          idx + 1,
-          idx - width,
-          idx + width,
-        ];
-        for (const n of neighbors) {
-          if (n < 0 || n >= edges.length) continue;
-          if (!edges[n] || visited[n]) continue;
-          visited[n] = 1;
-          stack.push(n);
-        }
-      }
-      const w = maxX - minX + 1;
-      const h = maxY - minY + 1;
-      const area = w * h;
-      const aspect = w / h;
-      if (area < minArea) continue;
-      if (aspect < 2 || aspect > 6.5) continue;
-      if (!best || area > best.area) {
-        best = { x: minX, y: minY, w, h, area };
-      }
+    configureOrt();
+    const session = await ort.InferenceSession.create(
+      "/models/license_plate_detector.onnx"
+    );
+    detectorSessionRef.current = session;
+    return session;
+  };
+
+  const getOcrSession = async () => {
+    if (ocrSessionRef.current) {
+      return ocrSessionRef.current;
     }
-    if (!best) return null;
-    const padX = Math.round(best.w * 0.08);
-    const padY = Math.round(best.h * 0.25);
-    const cropX = Math.max(0, best.x - padX);
-    const cropY = Math.max(0, best.y - padY);
-    const cropW = Math.min(width - cropX, best.w + padX * 2);
-    const cropH = Math.min(height - cropY, best.h + padY * 2);
+    configureOrt();
+    const session = await ort.InferenceSession.create("/models/plate_ocr.onnx");
+    ocrSessionRef.current = session;
+    return session;
+  };
+
+  const prepareDetectorInput = (image: HTMLImageElement, width: number, height: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const scale = Math.min(width / image.width, height / image.height);
+    const scaledWidth = Math.round(image.width * scale);
+    const scaledHeight = Math.round(image.height * scale);
+    const padX = Math.floor((width - scaledWidth) / 2);
+    const padY = Math.floor((height - scaledHeight) / 2);
+    ctx.fillStyle = "black";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(image, padX, padY, scaledWidth, scaledHeight);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const input = new Float32Array(3 * width * height);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const idx = i / 4;
+      input[idx] = imageData.data[i] / 255;
+      input[idx + width * height] = imageData.data[i + 1] / 255;
+      input[idx + 2 * width * height] = imageData.data[i + 2] / 255;
+    }
     return {
-      x: cropX / scale,
-      y: cropY / scale,
-      width: cropW / scale,
-      height: cropH / scale,
+      input,
+      scale,
+      padX,
+      padY,
+      width,
+      height,
     };
   };
 
-  const preprocessPlate = (imageData: ImageData) => {
-    const { width, height, data } = imageData;
-    const gray = new Uint8ClampedArray(width * height);
-    let min = 255;
-    let max = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const value =
-        0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      gray[i / 4] = value;
-      min = Math.min(min, value);
-      max = Math.max(max, value);
-    }
-    const range = Math.max(1, max - min);
-    for (let i = 0; i < gray.length; i += 1) {
-      gray[i] = Math.min(255, Math.max(0, ((gray[i] - min) / range) * 255));
-    }
-    const integral = new Uint32Array((width + 1) * (height + 1));
-    for (let y = 1; y <= height; y += 1) {
-      let rowSum = 0;
-      for (let x = 1; x <= width; x += 1) {
-        rowSum += gray[(y - 1) * width + (x - 1)];
-        integral[y * (width + 1) + x] =
-          integral[(y - 1) * (width + 1) + x] + rowSum;
-      }
-    }
-    const blockSize = 15;
-    const half = Math.floor(blockSize / 2);
-    const bias = 10;
-    const binary = new Uint8ClampedArray(width * height);
-    for (let y = 0; y < height; y += 1) {
-      const y0 = Math.max(0, y - half);
-      const y1 = Math.min(height - 1, y + half);
-      for (let x = 0; x < width; x += 1) {
-        const x0 = Math.max(0, x - half);
-        const x1 = Math.min(width - 1, x + half);
-        const idx = y * width + x;
-        const area = (x1 - x0 + 1) * (y1 - y0 + 1);
-        const sum =
-          integral[(y1 + 1) * (width + 1) + (x1 + 1)] -
-          integral[y0 * (width + 1) + (x1 + 1)] -
-          integral[(y1 + 1) * (width + 1) + x0] +
-          integral[y0 * (width + 1) + x0];
-        const mean = sum / area;
-        binary[idx] = gray[idx] < mean - bias ? 0 : 255;
-      }
-    }
-    const morph = new Uint8ClampedArray(width * height);
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        let maxVal = 0;
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            const val = binary[(y + dy) * width + (x + dx)];
-            if (val > maxVal) maxVal = val;
-          }
-        }
-        morph[y * width + x] = maxVal;
-      }
-    }
-    for (let y = 1; y < height - 1; y += 1) {
-      for (let x = 1; x < width - 1; x += 1) {
-        let minVal = 255;
-        for (let dy = -1; dy <= 1; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            const val = morph[(y + dy) * width + (x + dx)];
-            if (val < minVal) minVal = val;
-          }
-        }
-        binary[y * width + x] = minVal;
-      }
-    }
-    let mean = 0;
-    for (let i = 0; i < binary.length; i += 1) {
-      mean += binary[i];
-    }
-    mean /= binary.length;
-    if (mean < 127) {
-      for (let i = 0; i < binary.length; i += 1) {
-        binary[i] = 255 - binary[i];
-      }
-    }
-    const processed = new ImageData(width, height);
-    for (let i = 0; i < binary.length; i += 1) {
-      const offset = i * 4;
-      processed.data[offset] = binary[i];
-      processed.data[offset + 1] = binary[i];
-      processed.data[offset + 2] = binary[i];
-      processed.data[offset + 3] = 255;
-    }
-    return processed;
+  const iou = (a: number[], b: number[]) => {
+    const x1 = Math.max(a[0], b[0]);
+    const y1 = Math.max(a[1], b[1]);
+    const x2 = Math.min(a[2], b[2]);
+    const y2 = Math.min(a[3], b[3]);
+    const interArea = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const boxAArea = Math.max(0, a[2] - a[0]) * Math.max(0, a[3] - a[1]);
+    const boxBArea = Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    return interArea / Math.max(1, boxAArea + boxBArea - interArea);
   };
 
-  const upscaleImageData = (imageData: ImageData, scale: number) => {
+  const nms = (boxes: Array<{ box: number[]; score: number }>, threshold: number) => {
+    const sorted = [...boxes].sort((a, b) => b.score - a.score);
+    const selected: Array<{ box: number[]; score: number }> = [];
+    while (sorted.length) {
+      const current = sorted.shift();
+      if (!current) break;
+      selected.push(current);
+      for (let i = sorted.length - 1; i >= 0; i -= 1) {
+        if (iou(current.box, sorted[i].box) > threshold) {
+          sorted.splice(i, 1);
+        }
+      }
+    }
+    return selected;
+  };
+
+  const parseDetectorOutput = (
+    output: ort.Tensor,
+    inputWidth: number,
+    inputHeight: number,
+    scoreThreshold: number
+  ) => {
+    const data = output.data as Float32Array;
+    const dims = output.dims;
+    const candidates: Array<{ box: number[]; score: number }> = [];
+    if (dims.length !== 3) return candidates;
+    let normalized = true;
+    if (dims[2] <= 10) {
+      const boxes = dims[1];
+      const channels = dims[2];
+      let maxCoord = 0;
+      for (let i = 0; i < Math.min(boxes, 50); i += 1) {
+        const base = i * channels;
+        maxCoord = Math.max(
+          maxCoord,
+          Math.abs(data[base]),
+          Math.abs(data[base + 1]),
+          Math.abs(data[base + 2]),
+          Math.abs(data[base + 3])
+        );
+      }
+      normalized = maxCoord <= 1.5;
+      for (let i = 0; i < boxes; i += 1) {
+        const base = i * channels;
+        const x = data[base];
+        const y = data[base + 1];
+        const w = data[base + 2];
+        const h = data[base + 3];
+        const obj = channels > 4 ? sigmoid(data[base + 4]) : 1;
+        const cls = channels > 5 ? sigmoid(data[base + 5]) : 1;
+        const score = obj * cls;
+        if (score < scoreThreshold) continue;
+        const scaleX = normalized ? inputWidth : 1;
+        const scaleY = normalized ? inputHeight : 1;
+        const cx = x * scaleX;
+        const cy = y * scaleY;
+        const bw = w * scaleX;
+        const bh = h * scaleY;
+        candidates.push({
+          box: [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2],
+          score,
+        });
+      }
+    } else {
+      const channels = dims[1];
+      const boxes = dims[2];
+      let maxCoord = 0;
+      for (let i = 0; i < Math.min(boxes, 50); i += 1) {
+        maxCoord = Math.max(
+          maxCoord,
+          Math.abs(data[i]),
+          Math.abs(data[i + boxes]),
+          Math.abs(data[i + 2 * boxes]),
+          Math.abs(data[i + 3 * boxes])
+        );
+      }
+      normalized = maxCoord <= 1.5;
+      for (let i = 0; i < boxes; i += 1) {
+        const x = data[i];
+        const y = data[i + boxes];
+        const w = data[i + 2 * boxes];
+        const h = data[i + 3 * boxes];
+        const obj = channels > 4 ? sigmoid(data[i + 4 * boxes]) : 1;
+        const cls = channels > 5 ? sigmoid(data[i + 5 * boxes]) : 1;
+        const score = obj * cls;
+        if (score < scoreThreshold) continue;
+        const scaleX = normalized ? inputWidth : 1;
+        const scaleY = normalized ? inputHeight : 1;
+        const cx = x * scaleX;
+        const cy = y * scaleY;
+        const bw = w * scaleX;
+        const bh = h * scaleY;
+        candidates.push({
+          box: [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2],
+          score,
+        });
+      }
+    }
+    return nms(candidates, 0.4);
+  };
+
+  const cropPlate = (image: HTMLImageElement, box: number[]) => {
+    const [x1, y1, x2, y2] = box;
+    const width = Math.max(1, x2 - x1);
+    const height = Math.max(1, y2 - y1);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.round(imageData.width * scale);
-    canvas.height = Math.round(imageData.height * scale);
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    const temp = document.createElement("canvas");
-    temp.width = imageData.width;
-    temp.height = imageData.height;
-    const tempCtx = temp.getContext("2d");
-    if (!tempCtx) return null;
-    tempCtx.putImageData(imageData, 0, 0);
-    context.imageSmoothingEnabled = false;
-    context.drawImage(temp, 0, 0, canvas.width, canvas.height);
+    canvas.width = Math.round(width);
+    canvas.height = Math.round(height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(image, x1, y1, width, height, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/png");
+  };
+
+  const prepareOcrInput = (image: HTMLImageElement) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = OCR_INPUT.width;
+    canvas.height = OCR_INPUT.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const scale = Math.min(
+      OCR_INPUT.width / image.width,
+      OCR_INPUT.height / image.height
+    );
+    const scaledWidth = Math.round(image.width * scale);
+    const scaledHeight = Math.round(image.height * scale);
+    const padX = Math.floor((OCR_INPUT.width - scaledWidth) / 2);
+    const padY = Math.floor((OCR_INPUT.height - scaledHeight) / 2);
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, OCR_INPUT.width, OCR_INPUT.height);
+    ctx.drawImage(image, padX, padY, scaledWidth, scaledHeight);
+    const imageData = ctx.getImageData(0, 0, OCR_INPUT.width, OCR_INPUT.height);
+    const input = new Float32Array(3 * OCR_INPUT.width * OCR_INPUT.height);
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const idx = i / 4;
+      input[idx] = imageData.data[i] / 255;
+      input[idx + OCR_INPUT.width * OCR_INPUT.height] = imageData.data[i + 1] / 255;
+      input[idx + 2 * OCR_INPUT.width * OCR_INPUT.height] = imageData.data[i + 2] / 255;
+    }
+    return input;
   };
 
   const extractPlate = (rawText: string) => {
@@ -333,46 +319,88 @@ export default function Home() {
     );
   };
 
-  const getOcrWorker = async () => {
-    if (ocrWorkerRef.current) {
-      return ocrWorkerRef.current;
+  const decodeOcrOutput = (output: ort.Tensor) => {
+    const data = output.data as Float32Array;
+    const dims = output.dims;
+    let slots = OCR_INPUT.maxSlots;
+    let classes = OCR_ALPHABET.length;
+    let layout: "slots-first" | "classes-first" = "slots-first";
+    if (dims.length === 3) {
+      if (dims[2] === classes) {
+        slots = dims[1];
+        layout = "slots-first";
+      } else if (dims[1] === classes) {
+        slots = dims[2];
+        layout = "classes-first";
+      }
     }
-
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng", 1, {
-      logger: (message) => {
-        if (typeof message?.progress === "number") {
-          setOcrProgress(message.progress);
+    let text = "";
+    let confidenceSum = 0;
+    for (let slot = 0; slot < slots; slot += 1) {
+      let maxVal = -Infinity;
+      let maxIdx = 0;
+      for (let cls = 0; cls < classes; cls += 1) {
+        const idx =
+          layout === "slots-first"
+            ? slot * classes + cls
+            : cls * slots + slot;
+        const value = data[idx];
+        if (value > maxVal) {
+          maxVal = value;
+          maxIdx = cls;
         }
-      },
-    });
-    ocrWorkerRef.current = worker;
-    return worker;
+      }
+      let expSum = 0;
+      for (let cls = 0; cls < classes; cls += 1) {
+        const idx =
+          layout === "slots-first"
+            ? slot * classes + cls
+            : cls * slots + slot;
+        expSum += Math.exp(data[idx] - maxVal);
+      }
+      const confidence = expSum ? 1 / expSum : 0;
+      confidenceSum += confidence;
+      const char = OCR_ALPHABET[maxIdx] ?? "";
+      if (char !== OCR_PAD) {
+        text += char;
+      }
+    }
+    const avgConfidence = slots ? (confidenceSum / slots) * 100 : null;
+    return { text, confidence: avgConfidence };
   };
 
-  const runOcr = async (imageData: string, psm: PSM) => {
+  const runOcr = async (imageData: string) => {
     setOcrStatus("loading");
     setOcrError(null);
-    setOcrProgress(0);
     setOcrConfidence(null);
 
     try {
-      const worker = await getOcrWorker();
-      await worker.setParameters?.({
-        tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-        tessedit_pageseg_mode: psm,
-        tessedit_ocr_engine_mode: `${OEM.LSTM_ONLY}`,
-      });
-      const result = await worker.recognize(imageData);
-      const text = result.data.text ?? "";
-      const plate = extractPlate(text);
+      const image = await loadImageElement(imageData);
+      if (!image) {
+        throw new Error("Unable to read image.");
+      }
+      const session = await getOcrSession();
+      const input = prepareOcrInput(image);
+      if (!input) {
+        throw new Error("Unable to prepare OCR input.");
+      }
+      const inputName = session.inputNames[0];
+      const tensor = new ort.Tensor(
+        "float32",
+        input,
+        [1, 3, OCR_INPUT.height, OCR_INPUT.width]
+      );
+      const results = await session.run({ [inputName]: tensor });
+      const output = results[session.outputNames[0]] as ort.Tensor;
+      const decoded = decodeOcrOutput(output);
+      const plate = extractPlate(decoded.text);
       if (!plate) {
         setOcrStatus("error");
         setOcrError("No plate detected. Try again with a clearer shot.");
         return "";
       }
       setOcrStatus("success");
-      setOcrConfidence(result.data.confidence ?? null);
+      setOcrConfidence(decoded.confidence ?? null);
       return plate;
     } catch (error) {
       setOcrStatus("error");
@@ -390,52 +418,57 @@ export default function Home() {
       return;
     }
     if (snapshot) {
-      const imageData = await loadImageData(snapshot);
-      let cropDataUrl = snapshot;
-      if (imageData) {
-        const crop = detectPlateCrop(imageData);
-        if (crop) {
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.round(crop.width);
-          canvas.height = Math.round(crop.height);
-          const ctx = canvas.getContext("2d");
-          if (ctx) {
-            const temp = document.createElement("canvas");
-            temp.width = imageData.width;
-            temp.height = imageData.height;
-            const tempCtx = temp.getContext("2d");
-            if (tempCtx) {
-              tempCtx.putImageData(imageData, 0, 0);
-              ctx.drawImage(
-                temp,
-                crop.x,
-                crop.y,
-                crop.width,
-                crop.height,
-                0,
-                0,
-                canvas.width,
-                canvas.height
-              );
-              cropDataUrl = canvas.toDataURL("image/png");
-            }
-          }
+      setOcrStatus("loading");
+      setOcrError(null);
+      try {
+        const image = await loadImageElement(snapshot);
+        if (!image) {
+          throw new Error("Unable to read camera frame.");
         }
-      }
-      setSnapshotUrl(cropDataUrl);
-      const cropData = await loadImageData(cropDataUrl);
-      const processedData = cropData ? preprocessPlate(cropData) : null;
-      const processedUrl = processedData ? upscaleImageData(processedData, 2) : null;
-      let ocrResult = normalizePlate(
-        await runOcr(processedUrl ?? cropDataUrl, PSM.SINGLE_LINE)
-      );
-      if (!ocrResult) {
-        ocrResult = normalizePlate(await runOcr(cropDataUrl, PSM.SINGLE_WORD));
-      }
-      if (ocrResult) {
-        setDetectedPlate(ocrResult);
-        setPlateInput(ocrResult);
-        return;
+        const detectorSession = await getDetectorSession();
+        const inputName = detectorSession.inputNames[0];
+        const inputMeta = detectorSession.inputMetadata[0] as {
+          dimensions?: Array<number | string>;
+        };
+        const inputHeight = Number(inputMeta?.dimensions?.[2]) || 640;
+        const inputWidth = Number(inputMeta?.dimensions?.[3]) || 640;
+        const prepared = prepareDetectorInput(image, inputWidth, inputHeight);
+        if (!prepared) {
+          throw new Error("Unable to prepare detector input.");
+        }
+        const tensor = new ort.Tensor(
+          "float32",
+          prepared.input,
+          [1, 3, inputHeight, inputWidth]
+        );
+        const outputs = await detectorSession.run({ [inputName]: tensor });
+        const output = outputs[detectorSession.outputNames[0]] as ort.Tensor;
+        const detections = parseDetectorOutput(output, inputWidth, inputHeight, 0.3);
+        if (!detections.length) {
+          throw new Error("No plate detected. Try again with a clearer shot.");
+        }
+        const best = detections[0];
+        const x1 = Math.max(0, (best.box[0] - prepared.padX) / prepared.scale);
+        const y1 = Math.max(0, (best.box[1] - prepared.padY) / prepared.scale);
+        const x2 = Math.min(
+          image.width,
+          (best.box[2] - prepared.padX) / prepared.scale
+        );
+        const y2 = Math.min(
+          image.height,
+          (best.box[3] - prepared.padY) / prepared.scale
+        );
+        const cropUrl = cropPlate(image, [x1, y1, x2, y2]) ?? snapshot;
+        setSnapshotUrl(cropUrl);
+        const ocrResult = normalizePlate(await runOcr(cropUrl));
+        if (ocrResult) {
+          setDetectedPlate(ocrResult);
+          setPlateInput(ocrResult);
+          return;
+        }
+      } catch (error) {
+        setOcrStatus("error");
+        setOcrError(error instanceof Error ? error.message : "Plate scan failed.");
       }
     }
   };
@@ -603,7 +636,7 @@ export default function Home() {
               </p>
               {ocrStatus === "loading" ? (
                 <p className="mt-3 text-sm text-slate-600">
-                  OCR scanning {Math.round(ocrProgress * 100)}%
+                  Processing plate...
                 </p>
               ) : null}
               {ocrConfidence !== null && ocrStatus === "success" ? (
