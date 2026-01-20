@@ -9,10 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.91.0",
+    "mapbox-gl": "^3.18.0",
     "next": "16.1.4",
+    "onnxruntime-web": "^1.19.2",
     "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "onnxruntime-web": "^1.19.2"
+    "react-dom": "19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

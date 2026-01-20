@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import * as ort from "onnxruntime-web";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -17,9 +20,14 @@ export default function Home() {
   const detectorSessionRef = useRef<ort.InferenceSession | null>(null);
   const ocrSessionRef = useRef<ort.InferenceSession | null>(null);
   const ocrTimeoutRef = useRef<number | null>(null);
+  const detailsRef = useRef<HTMLDivElement | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markerRef = useRef<mapboxgl.Marker | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
+  const [rawSnapshotUrl, setRawSnapshotUrl] = useState<string | null>(null);
   const [plateInput, setPlateInput] = useState("");
   const [detectedPlate, setDetectedPlate] = useState<string | null>(null);
   const [ocrStatus, setOcrStatus] = useState<"idle" | "loading" | "success" | "error">(
@@ -30,6 +38,17 @@ export default function Home() {
   const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [vehicleData, setVehicleData] = useState<VehicleData | null>(null);
+  const [locationStatus, setLocationStatus] = useState<
+    "idle" | "loading" | "success" | "denied" | "error"
+  >("idle");
+  const [locationData, setLocationData] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
+  const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">(
+    "idle"
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -465,6 +484,7 @@ export default function Home() {
         setOcrError("Scan timed out. Please try again.");
       }, 15000);
       try {
+        setRawSnapshotUrl(snapshot);
         const image = await loadImageElement(snapshot);
         if (!image) {
           throw new Error("Unable to read camera frame.");
@@ -528,6 +548,8 @@ export default function Home() {
 
     setLookupStatus("loading");
     setLookupError(null);
+    detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    requestLocation();
 
     try {
       const response = await fetch("/api/dvla", {
@@ -564,8 +586,11 @@ export default function Home() {
     const lines = Object.entries(infoData).map(
       ([key, value]) => `${formatLabel(key)}: ${String(value)}`
     );
-    return `Vehicle details\n${lines.join("\n")}`;
-  }, [infoData]);
+    const locationLine = locationData
+      ? `Location: ${locationData.lat.toFixed(6)}, ${locationData.lng.toFixed(6)}`
+      : "";
+    return `Vehicle details\n${lines.join("\n")}${locationLine ? `\n${locationLine}` : ""}`;
+  }, [infoData, locationData]);
 
   const handleShare = async () => {
     if (!shareText) return;
@@ -584,6 +609,92 @@ export default function Home() {
     }
   };
 
+  const handleSave = async () => {
+    if (!infoData) return;
+    setSaveStatus("loading");
+    setSaveError(null);
+    try {
+      const token = localStorage.getItem("supabaseAccessToken") ?? "";
+      const response = await fetch("/api/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          plate: normalizePlate(detectedPlate || plateInput),
+          vehicleData: infoData,
+          ocrConfidence,
+          location: locationData,
+          snapshotUrl,
+          rawSnapshotUrl,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "Save failed.");
+      }
+      setSaveStatus("success");
+    } catch (error) {
+      setSaveStatus("error");
+      setSaveError(error instanceof Error ? error.message : "Save failed.");
+    }
+  };
+
+  const requestLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus("error");
+      return;
+    }
+    setLocationStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationData({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+        setLocationStatus("success");
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationStatus("denied");
+        } else {
+          setLocationStatus("error");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
+  };
+
+  useEffect(() => {
+    if (!locationData || !mapContainerRef.current || !mapboxToken) return;
+
+    mapboxgl.accessToken = mapboxToken;
+    if (!mapRef.current) {
+      mapRef.current = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: "mapbox://styles/mapbox/streets-v12",
+        center: [locationData.lng, locationData.lat],
+        zoom: 14,
+      });
+      mapRef.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+      markerRef.current = new mapboxgl.Marker({ color: "#0f172a" })
+        .setLngLat([locationData.lng, locationData.lat])
+        .addTo(mapRef.current);
+    } else {
+      mapRef.current.setCenter([locationData.lng, locationData.lat]);
+      markerRef.current?.setLngLat([locationData.lng, locationData.lat]);
+    }
+  }, [locationData, mapboxToken]);
+
+  useEffect(() => {
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+      markerRef.current = null;
+    };
+  }, []);
+
   return (
     <div className="relative min-h-screen overflow-hidden px-6 py-10 text-slate-900">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(249,115,22,0.15),transparent_55%),radial-gradient(circle_at_80%_0%,rgba(56,189,248,0.18),transparent_45%)]" />
@@ -601,6 +712,14 @@ export default function Home() {
                 CarScan
               </h1>
             </div>
+            <nav className="ml-auto flex items-center gap-4 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+              <Link className="hover:text-slate-900" href="/auth/sign-in">
+                Sign In
+              </Link>
+              <Link className="hover:text-slate-900" href="/auth/sign-up">
+                Sign Up
+              </Link>
+            </nav>
           </div>
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <p className="max-w-2xl text-pretty text-lg text-slate-600">
@@ -725,7 +844,10 @@ export default function Home() {
               ) : null}
             </div>
 
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+            <div
+              ref={detailsRef}
+              className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
+            >
               <h2 className="font-[var(--font-display)] text-2xl text-slate-900">
                 Vehicle Data
               </h2>
@@ -750,6 +872,26 @@ export default function Home() {
                   Run a lookup to populate DVLA VES results.
                 </p>
               )}
+              {locationStatus === "loading" ? (
+                <p className="mt-4 text-xs uppercase tracking-[0.3em] text-slate-400">
+                  Fetching location...
+                </p>
+              ) : null}
+              {locationStatus === "denied" ? (
+                <p className="mt-4 text-xs uppercase tracking-[0.3em] text-amber-600">
+                  Location permission denied
+                </p>
+              ) : null}
+              {locationStatus === "error" ? (
+                <p className="mt-4 text-xs uppercase tracking-[0.3em] text-rose-600">
+                  Location unavailable
+                </p>
+              ) : null}
+              {locationData && mapboxToken ? (
+                <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
+                  <div ref={mapContainerRef} className="h-48 w-full" />
+                </div>
+              ) : null}
               {infoData ? (
                 <div className="mt-6 grid gap-2 sm:grid-cols-2">
                   <button
@@ -791,6 +933,23 @@ export default function Home() {
                   >
                     Email
                   </a>
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    className="h-12 w-full rounded-full bg-emerald-500 text-sm font-semibold uppercase tracking-[0.3em] text-white sm:col-span-2"
+                  >
+                    {saveStatus === "loading" ? "Saving..." : "Save"}
+                  </button>
+                  {saveStatus === "success" ? (
+                    <p className="sm:col-span-2 text-xs uppercase tracking-[0.3em] text-emerald-600">
+                      Saved to Supabase
+                    </p>
+                  ) : null}
+                  {saveStatus === "error" ? (
+                    <p className="sm:col-span-2 text-xs uppercase tracking-[0.3em] text-rose-600">
+                      {saveError ?? "Save failed."}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </div>
