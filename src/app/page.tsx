@@ -1,6 +1,6 @@
 "use client";
 
-import type { Worker as TesseractWorker } from "tesseract.js";
+import { OEM, PSM, type Worker as TesseractWorker } from "tesseract.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type VehicleData = Record<string, string | number | boolean | null>;
@@ -107,8 +107,8 @@ export default function Home() {
     });
     await worker.setParameters?.({
       tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      tessedit_pageseg_mode: 7,
-      tessedit_ocr_engine_mode: 1,
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
+      tessedit_ocr_engine_mode: `${OEM.LSTM_ONLY}`,
       user_defined_dpi: "300",
     });
 
