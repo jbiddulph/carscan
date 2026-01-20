@@ -752,7 +752,7 @@ export default function Home() {
             <nav className="ml-auto flex items-center gap-4 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
               {authReady && userEmail ? (
                 <>
-                  <span className="text-slate-600">{userEmail}</span>
+                  <span className="hidden text-slate-600 md:inline">{userEmail}</span>
                   <button
                     type="button"
                     onClick={handleLogout}

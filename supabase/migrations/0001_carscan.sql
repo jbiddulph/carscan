@@ -59,7 +59,7 @@ create policy "carscan_vehicles_select_own"
 
 -- Table grants for authenticated users (RLS still applies).
 revoke all on table public.carscan_vehicles from anon, authenticated;
-grant select, insert, update, delete on table public.carscan_vehicles to anon, authenticated;
+grant select, insert, update, delete on table public.carscan_vehicles to anon, authenticated, service_role;
 
 -- Storage bucket for images.
 insert into storage.buckets (id, name, public)
