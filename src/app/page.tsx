@@ -119,7 +119,12 @@ export default function Home() {
     return session;
   };
 
-  const prepareDetectorInput = (image: HTMLImageElement, width: number, height: number) => {
+  const prepareDetectorInput = (
+    image: HTMLImageElement,
+    width: number,
+    height: number,
+    useUint8: boolean
+  ) => {
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -134,15 +139,24 @@ export default function Home() {
     ctx.fillRect(0, 0, width, height);
     ctx.drawImage(image, padX, padY, scaledWidth, scaledHeight);
     const imageData = ctx.getImageData(0, 0, width, height);
-    const input = new Float32Array(3 * width * height);
+    const input = useUint8
+      ? new Uint8Array(3 * width * height)
+      : new Float32Array(3 * width * height);
     for (let i = 0; i < imageData.data.length; i += 4) {
       const idx = i / 4;
-      input[idx] = imageData.data[i] / 255;
-      input[idx + width * height] = imageData.data[i + 1] / 255;
-      input[idx + 2 * width * height] = imageData.data[i + 2] / 255;
+      if (useUint8) {
+        input[idx] = imageData.data[i];
+        input[idx + width * height] = imageData.data[i + 1];
+        input[idx + 2 * width * height] = imageData.data[i + 2];
+      } else {
+        input[idx] = imageData.data[i] / 255;
+        input[idx + width * height] = imageData.data[i + 1] / 255;
+        input[idx + 2 * width * height] = imageData.data[i + 2] / 255;
+      }
     }
     return {
       input,
+      type: useUint8 ? "uint8" : "float32",
       scale,
       padX,
       padY,
@@ -432,12 +446,19 @@ export default function Home() {
         };
         const inputHeight = Number(inputMeta?.dimensions?.[2]) || 640;
         const inputWidth = Number(inputMeta?.dimensions?.[3]) || 640;
-        const prepared = prepareDetectorInput(image, inputWidth, inputHeight);
+        const inputType = (inputMeta as { type?: string })?.type ?? "";
+        const useUint8 = inputType.includes("uint8");
+        const prepared = prepareDetectorInput(
+          image,
+          inputWidth,
+          inputHeight,
+          useUint8
+        );
         if (!prepared) {
           throw new Error("Unable to prepare detector input.");
         }
         const tensor = new ort.Tensor(
-          "float32",
+          prepared.type,
           prepared.input,
           [1, 3, inputHeight, inputWidth]
         );
