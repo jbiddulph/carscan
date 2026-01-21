@@ -496,6 +496,24 @@ export default function Home() {
 
   const handleDetectPlate = async () => {
     if (ocrStatus === "loading") return;
+    if (!cameraReady) {
+      stopCamera();
+      clearOcrTimeout();
+      setSnapshotUrl(null);
+      setRawSnapshotUrl(null);
+      setDetectedPlate(null);
+      setPlateInput("");
+      setOcrStatus("idle");
+      setOcrError(null);
+      setOcrConfidence(null);
+      setLookupStatus("idle");
+      setLookupError(null);
+      setVehicleData(null);
+      setSaveStatus("idle");
+      setSaveError(null);
+      await startCamera();
+      return;
+    }
     const snapshot = captureFrame();
     const trimmed = normalizePlate(plateInput.trim());
     if (trimmed) {
@@ -513,6 +531,7 @@ export default function Home() {
       }, 15000);
       try {
         setRawSnapshotUrl(snapshot);
+        stopCamera();
         const image = await loadImageElement(snapshot);
         if (!image) {
           throw new Error("Unable to read camera frame.");
@@ -556,7 +575,6 @@ export default function Home() {
         if (ocrResult) {
           setDetectedPlate(ocrResult);
           setPlateInput(ocrResult);
-          stopCamera();
           return;
         }
       } catch (error) {
@@ -678,22 +696,6 @@ export default function Home() {
     setUserEmail(null);
   };
 
-  const handleResumeCamera = async () => {
-    stopCamera();
-    clearOcrTimeout();
-    setSnapshotUrl(null);
-    setRawSnapshotUrl(null);
-    setDetectedPlate(null);
-    setOcrError(null);
-    setOcrStatus("idle");
-    setOcrConfidence(null);
-    setLookupStatus("idle");
-    setLookupError(null);
-    setVehicleData(null);
-    setSaveStatus("idle");
-    setSaveError(null);
-    await startCamera();
-  };
 
   const requestLocation = () => {
     if (!navigator.geolocation) {
@@ -856,15 +858,6 @@ export default function Home() {
                   Hold steady for best detection
                 </p>
               )}
-              {!cameraReady ? (
-                <button
-                  type="button"
-                  onClick={handleResumeCamera}
-                  className="mt-4 h-11 w-full rounded-full border border-white/20 text-xs font-semibold uppercase tracking-[0.3em] text-white"
-                >
-                  Resume Camera
-                </button>
-              ) : null}
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
               <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
@@ -885,7 +878,11 @@ export default function Home() {
                   disabled={ocrStatus === "loading"}
                   className="h-12 w-full rounded-full bg-orange-500 text-sm font-semibold uppercase tracking-[0.3em] text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {ocrStatus === "loading" ? "Scanning..." : "Detect Plate"}
+                  {ocrStatus === "loading"
+                    ? "Scanning..."
+                    : cameraReady
+                    ? "Detect Plate"
+                    : "Resume Camera"}
                 </button>
                 <button
                   type="button"
