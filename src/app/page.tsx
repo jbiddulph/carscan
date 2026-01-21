@@ -22,6 +22,7 @@ export default function Home() {
   const ocrSessionRef = useRef<ort.InferenceSession | null>(null);
   const ocrTimeoutRef = useRef<number | null>(null);
   const detailsRef = useRef<HTMLDivElement | null>(null);
+  const detectionRef = useRef<HTMLDivElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
@@ -55,6 +56,8 @@ export default function Home() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+  const [zoomSupported, setZoomSupported] = useState(false);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
   const startCamera = async () => {
@@ -74,6 +77,9 @@ export default function Home() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track?.getCapabilities?.();
+      setZoomSupported(Boolean(capabilities && "zoom" in capabilities));
       setCameraReady(true);
       setCameraError(null);
     } catch (error) {
@@ -92,6 +98,7 @@ export default function Home() {
       videoRef.current.srcObject = null;
     }
     setCameraReady(false);
+    setZoomed(false);
   };
 
   useEffect(() => {
@@ -580,6 +587,7 @@ export default function Home() {
         if (ocrResult) {
           setDetectedPlate(ocrResult);
           setPlateInput(ocrResult);
+          detectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
           return;
         }
       } catch (error) {
@@ -712,6 +720,23 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUserEmail(null);
+  };
+
+  const handleToggleZoom = async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const capabilities = track.getCapabilities?.();
+    if (!capabilities || !("zoom" in capabilities)) {
+      setZoomSupported(false);
+      return;
+    }
+    const target = zoomed ? 1 : 3;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: target }] });
+      setZoomed(!zoomed);
+    } catch {
+      setZoomSupported(false);
+    }
   };
 
   const handleResumeCamera = async () => {
@@ -891,7 +916,7 @@ export default function Home() {
                 {cameraReady ? "Ready" : "Waiting"}
               </span>
             </div>
-            <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-950/90 p-4 text-slate-100">
+            <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-950/90 text-slate-100">
               <div className="aspect-video w-full overflow-hidden rounded-[20px] border border-white/10 bg-slate-900">
                 <video
                   ref={videoRef}
@@ -901,14 +926,16 @@ export default function Home() {
                   playsInline
                 />
               </div>
-              <canvas ref={canvasRef} className="hidden" />
-              {cameraError ? (
-                <p className="mt-4 text-sm text-amber-200">{cameraError}</p>
-              ) : (
-                <p className="mt-4 text-xs uppercase tracking-[0.3em] text-slate-300">
-                  Hold steady for best detection
-                </p>
-              )}
+              <div className="px-4 pb-4">
+                <canvas ref={canvasRef} className="hidden" />
+                {cameraError ? (
+                  <p className="mt-4 text-sm text-amber-200">{cameraError}</p>
+                ) : (
+                  <p className="mt-4 text-xs uppercase tracking-[0.3em] text-slate-300">
+                    Hold steady for best detection
+                  </p>
+                )}
+              </div>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
               <div className="flex flex-col gap-2">
@@ -926,10 +953,11 @@ export default function Home() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleLookup}
-                  className="h-12 w-full rounded-full border border-slate-300 bg-white text-sm font-semibold uppercase tracking-[0.3em] text-slate-800 transition hover:border-slate-900"
+                  onClick={handleToggleZoom}
+                  disabled={!cameraReady || !zoomSupported}
+                  className="h-12 w-full rounded-full border border-slate-300 bg-white text-sm font-semibold uppercase tracking-[0.3em] text-slate-800 transition hover:border-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Lookup DVLA
+                  {zoomed ? "Zoom Out" : "Zoom In"}
                 </button>
               </div>
             </div>
@@ -959,7 +987,10 @@ export default function Home() {
           </div>
 
           <div className="flex flex-col gap-6">
-            <div className="rounded-[28px] border border-white/80 bg-white/80 p-6 shadow-[0_18px_40px_rgba(15,23,42,0.1)] animate-fade-in">
+            <div
+              ref={detectionRef}
+              className="rounded-[28px] border border-white/80 bg-white/80 p-6 shadow-[0_18px_40px_rgba(15,23,42,0.1)] animate-fade-in"
+            >
               <h2 className="font-[var(--font-display)] text-2xl text-slate-900">
                 Detection Result
               </h2>
@@ -994,6 +1025,13 @@ export default function Home() {
               {lookupError ? (
                 <p className="mt-3 text-sm text-rose-600">{lookupError}</p>
               ) : null}
+              <button
+                type="button"
+                onClick={handleLookup}
+                className="mt-6 h-12 w-full rounded-full border border-slate-300 bg-white text-sm font-semibold uppercase tracking-[0.3em] text-slate-800 transition hover:border-slate-900"
+              >
+                Lookup DVLA
+              </button>
             </div>
 
             <div
