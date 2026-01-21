@@ -25,6 +25,7 @@ export default function Home() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
@@ -51,33 +52,47 @@ export default function Home() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-
-    const startCamera = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-        setCameraReady(true);
-      } catch (error) {
-        setCameraError(
-          error instanceof Error ? error.message : "Unable to access the camera."
-        );
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
-    };
+      setCameraReady(true);
+      setCameraError(null);
+    } catch (error) {
+      setCameraError(
+        error instanceof Error ? error.message : "Unable to access the camera."
+      );
+    }
+  };
 
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraReady(false);
+  };
+
+  useEffect(() => {
     startCamera();
 
     return () => {
-      stream?.getTracks().forEach((track) => track.stop());
+      stopCamera();
     };
   }, []);
 
@@ -86,14 +101,19 @@ export default function Home() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return null;
 
-    const width = video.videoWidth || 1280;
-    const height = video.videoHeight || 720;
+    const sourceWidth = video.videoWidth || 1280;
+    const sourceHeight = video.videoHeight || 720;
+    const maxWidth = 1280;
+    const maxHeight = 720;
+    const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1);
+    const width = Math.round(sourceWidth * scale);
+    const height = Math.round(sourceHeight * scale);
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.95);
+    return canvas.toDataURL("image/jpeg", 0.85);
   };
 
   const normalizePlate = (value: string) =>
@@ -471,6 +491,7 @@ export default function Home() {
   };
 
   const handleDetectPlate = async () => {
+    if (ocrStatus === "loading") return;
     const snapshot = captureFrame();
     const trimmed = normalizePlate(plateInput.trim());
     if (trimmed) {
@@ -531,6 +552,8 @@ export default function Home() {
         if (ocrResult) {
           setDetectedPlate(ocrResult);
           setPlateInput(ocrResult);
+          setAutoScanEnabled(false);
+          stopCamera();
           return;
         }
       } catch (error) {
@@ -540,6 +563,16 @@ export default function Home() {
       }
     }
   };
+
+  useEffect(() => {
+    if (!autoScanEnabled || !cameraReady || ocrStatus === "loading" || detectedPlate) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      handleDetectPlate();
+    }, 1500);
+    return () => window.clearInterval(interval);
+  }, [autoScanEnabled, cameraReady, ocrStatus, detectedPlate]);
 
   const handleLookup = async () => {
     const registration = normalizePlate(detectedPlate || plateInput);
@@ -650,6 +683,14 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUserEmail(null);
+  };
+
+  const handleResumeCamera = async () => {
+    setDetectedPlate(null);
+    setOcrStatus("idle");
+    setOcrError(null);
+    setAutoScanEnabled(true);
+    await startCamera();
   };
 
   const requestLocation = () => {
@@ -813,6 +854,15 @@ export default function Home() {
                   Hold steady for best detection
                 </p>
               )}
+              {!cameraReady ? (
+                <button
+                  type="button"
+                  onClick={handleResumeCamera}
+                  className="mt-4 h-11 w-full rounded-full border border-white/20 text-xs font-semibold uppercase tracking-[0.3em] text-white"
+                >
+                  Resume Camera
+                </button>
+              ) : null}
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
               <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
@@ -994,7 +1044,7 @@ export default function Home() {
                   </button>
                   {saveStatus === "success" ? (
                     <p className="sm:col-span-2 text-xs uppercase tracking-[0.3em] text-emerald-600">
-                      Saved to Supabase
+                      Saved to Database
                     </p>
                   ) : null}
                   {saveStatus === "error" ? (
