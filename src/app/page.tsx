@@ -732,7 +732,9 @@ export default function Home() {
     }
     const target = zoomed ? 1 : 3;
     try {
-      await track.applyConstraints({ advanced: [{ zoom: target }] });
+      await track.applyConstraints({
+        advanced: [{ zoom: target } as MediaTrackConstraintSet],
+      });
       setZoomed(!zoomed);
     } catch {
       setZoomSupported(false);
