@@ -930,14 +930,10 @@ export default function Home() {
               </div>
               <div className="px-4 pb-4">
                 <canvas ref={canvasRef} className="hidden" />
-                {cameraError ? (
-                  <p className="mt-4 text-sm text-amber-200">{cameraError}</p>
-                ) : (
-                  <p className="mt-4 text-xs uppercase tracking-[0.3em] text-slate-300">
-                    Hold steady for best detection
-                  </p>
-                )}
-              </div>
+              {cameraError ? (
+                <p className="mt-4 text-sm text-amber-200">{cameraError}</p>
+              ) : null}
+            </div>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
               <div className="flex flex-col gap-2">
@@ -963,17 +959,6 @@ export default function Home() {
                 </button>
               </div>
             </div>
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-              <label className="text-xs uppercase tracking-[0.35em] text-slate-400">
-                Manual Plate Entry
-              </label>
-              <input
-                value={plateInput}
-                onChange={(event) => setPlateInput(event.target.value)}
-                placeholder="e.g. LM22 XPT"
-                className="mt-2 w-full bg-transparent text-lg font-semibold uppercase tracking-[0.2em] text-slate-900 outline-none placeholder:text-slate-400"
-              />
-            </div>
             {snapshotUrl ? (
               <div className="mt-6 rounded-[20px] border border-slate-200 bg-white p-4">
                 <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
@@ -985,7 +970,7 @@ export default function Home() {
                   className="mt-3 w-full rounded-[16px] object-cover"
                 />
               </div>
-            ) : null}
+              ) : null}
           </div>
 
           <div className="flex flex-col gap-6">
@@ -1027,6 +1012,17 @@ export default function Home() {
               {lookupError ? (
                 <p className="mt-3 text-sm text-rose-600">{lookupError}</p>
               ) : null}
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <label className="text-xs uppercase tracking-[0.35em] text-slate-400">
+                  Manual Plate Entry
+                </label>
+                <input
+                  value={plateInput}
+                  onChange={(event) => setPlateInput(event.target.value)}
+                  placeholder="e.g. LM22 XPT"
+                  className="mt-2 w-full bg-transparent text-lg font-semibold uppercase tracking-[0.2em] text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </div>
               <button
                 type="button"
                 onClick={handleLookup}
