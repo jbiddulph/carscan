@@ -509,26 +509,6 @@ export default function Home() {
   const handleDetectPlate = async () => {
     if (ocrStatus === "loading") return;
     if (!cameraReady) {
-      stopCamera();
-      clearOcrTimeout();
-      if (snapshotPreviewUrlRef.current) {
-        URL.revokeObjectURL(snapshotPreviewUrlRef.current);
-        snapshotPreviewUrlRef.current = null;
-      }
-      snapshotBlobRef.current = null;
-      rawSnapshotBlobRef.current = null;
-      setSnapshotUrl(null);
-      setDetectedPlate(null);
-      setPlateInput("");
-      setOcrStatus("idle");
-      setOcrError(null);
-      setOcrConfidence(null);
-      setLookupStatus("idle");
-      setLookupError(null);
-      setVehicleData(null);
-      setSaveStatus("idle");
-      setSaveError(null);
-      await startCamera();
       return;
     }
     const snapshot = await captureFrame();
@@ -734,6 +714,29 @@ export default function Home() {
     setUserEmail(null);
   };
 
+  const handleResumeCamera = async () => {
+    stopCamera();
+    clearOcrTimeout();
+    if (snapshotPreviewUrlRef.current) {
+      URL.revokeObjectURL(snapshotPreviewUrlRef.current);
+      snapshotPreviewUrlRef.current = null;
+    }
+    snapshotBlobRef.current = null;
+    rawSnapshotBlobRef.current = null;
+    setSnapshotUrl(null);
+    setDetectedPlate(null);
+    setPlateInput("");
+    setOcrStatus("idle");
+    setOcrError(null);
+    setOcrConfidence(null);
+    setLookupStatus("idle");
+    setLookupError(null);
+    setVehicleData(null);
+    setSaveStatus("idle");
+    setSaveError(null);
+    await startCamera();
+  };
+
 
   const requestLocation = () => {
     if (!navigator.geolocation) {
@@ -925,12 +928,17 @@ export default function Home() {
                   disabled={ocrStatus === "loading"}
                   className="h-12 w-full rounded-full bg-orange-500 text-sm font-semibold uppercase tracking-[0.3em] text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {ocrStatus === "loading"
-                    ? "Scanning..."
-                    : cameraReady
-                    ? "Detect Plate"
-                    : "Resume Camera"}
+                  {ocrStatus === "loading" ? "Scanning..." : "Detect Plate"}
                 </button>
+                {!cameraReady ? (
+                  <button
+                    type="button"
+                    onClick={handleResumeCamera}
+                    className="h-12 w-full rounded-full border border-slate-300 bg-white text-sm font-semibold uppercase tracking-[0.3em] text-slate-800 transition hover:border-slate-900"
+                  >
+                    Resume Camera
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={handleLookup}
