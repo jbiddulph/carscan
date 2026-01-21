@@ -27,10 +27,12 @@ export default function Home() {
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraStartingRef = useRef(false);
+  const snapshotBlobRef = useRef<Blob | null>(null);
+  const rawSnapshotBlobRef = useRef<Blob | null>(null);
+  const snapshotPreviewUrlRef = useRef<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
-  const [rawSnapshotUrl, setRawSnapshotUrl] = useState<string | null>(null);
   const [plateInput, setPlateInput] = useState("");
   const [detectedPlate, setDetectedPlate] = useState<string | null>(null);
   const [ocrStatus, setOcrStatus] = useState<"idle" | "loading" | "success" | "error">(
@@ -100,15 +102,15 @@ export default function Home() {
     };
   }, []);
 
-  const captureFrame = () => {
+  const captureFrame = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return null;
 
     const sourceWidth = video.videoWidth || 1280;
     const sourceHeight = video.videoHeight || 720;
-    const maxWidth = 1280;
-    const maxHeight = 720;
+    const maxWidth = 960;
+    const maxHeight = 540;
     const scale = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight, 1);
     const width = Math.round(sourceWidth * scale);
     const height = Math.round(sourceHeight * scale);
@@ -117,7 +119,12 @@ export default function Home() {
     const context = canvas.getContext("2d");
     if (!context) return null;
     context.drawImage(video, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.85);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((result) => resolve(result), "image/jpeg", 0.75)
+    );
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    return { blob, url };
   };
 
   const normalizePlate = (value: string) =>
@@ -331,7 +338,7 @@ export default function Home() {
     return nms(candidates, 0.4);
   };
 
-  const cropPlate = (image: HTMLImageElement, box: number[]) => {
+  const cropPlate = async (image: HTMLImageElement, box: number[]) => {
     const [x1, y1, x2, y2] = box;
     const width = Math.max(1, x2 - x1);
     const height = Math.max(1, y2 - y1);
@@ -341,7 +348,12 @@ export default function Home() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(image, x1, y1, width, height, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/png");
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((result) => resolve(result), "image/png")
+    );
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    return { blob, url };
   };
 
   const prepareOcrInput = (image: HTMLImageElement, useUint8: boolean) => {
@@ -499,8 +511,13 @@ export default function Home() {
     if (!cameraReady) {
       stopCamera();
       clearOcrTimeout();
+      if (snapshotPreviewUrlRef.current) {
+        URL.revokeObjectURL(snapshotPreviewUrlRef.current);
+        snapshotPreviewUrlRef.current = null;
+      }
+      snapshotBlobRef.current = null;
+      rawSnapshotBlobRef.current = null;
       setSnapshotUrl(null);
-      setRawSnapshotUrl(null);
       setDetectedPlate(null);
       setPlateInput("");
       setOcrStatus("idle");
@@ -514,7 +531,7 @@ export default function Home() {
       await startCamera();
       return;
     }
-    const snapshot = captureFrame();
+    const snapshot = await captureFrame();
     const trimmed = normalizePlate(plateInput.trim());
     if (trimmed) {
       setDetectedPlate(trimmed);
@@ -530,9 +547,9 @@ export default function Home() {
         setOcrError("Scan timed out. Please try again.");
       }, 15000);
       try {
-        setRawSnapshotUrl(snapshot);
+        rawSnapshotBlobRef.current = snapshot.blob;
         stopCamera();
-        const image = await loadImageElement(snapshot);
+        const image = await loadImageElement(snapshot.url);
         if (!image) {
           throw new Error("Unable to read camera frame.");
         }
@@ -569,9 +586,17 @@ export default function Home() {
           image.height,
           (best.box[3] - prepared.padY) / prepared.scale
         );
-        const cropUrl = cropPlate(image, [x1, y1, x2, y2]) ?? snapshot;
-        setSnapshotUrl(cropUrl);
-        const ocrResult = normalizePlate(await runOcr(cropUrl));
+        const cropped = (await cropPlate(image, [x1, y1, x2, y2])) ?? snapshot;
+        if (cropped.url !== snapshot.url) {
+          URL.revokeObjectURL(snapshot.url);
+        }
+        if (snapshotPreviewUrlRef.current) {
+          URL.revokeObjectURL(snapshotPreviewUrlRef.current);
+        }
+        snapshotPreviewUrlRef.current = cropped.url;
+        snapshotBlobRef.current = cropped.blob;
+        setSnapshotUrl(cropped.url);
+        const ocrResult = normalizePlate(await runOcr(cropped.url));
         if (ocrResult) {
           setDetectedPlate(ocrResult);
           setPlateInput(ocrResult);
@@ -665,6 +690,19 @@ export default function Home() {
       if (!token) {
         throw new Error("Please sign in to save.");
       }
+      const blobToDataUrl = (blob: Blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("Unable to read image."));
+          reader.readAsDataURL(blob);
+        });
+      const snapshotDataUrl = snapshotBlobRef.current
+        ? await blobToDataUrl(snapshotBlobRef.current)
+        : null;
+      const rawDataUrl = rawSnapshotBlobRef.current
+        ? await blobToDataUrl(rawSnapshotBlobRef.current)
+        : null;
       const response = await fetch("/api/save", {
         method: "POST",
         headers: {
@@ -676,8 +714,8 @@ export default function Home() {
           vehicleData: infoData,
           ocrConfidence,
           location: locationData,
-          snapshotUrl,
-          rawSnapshotUrl,
+          snapshotUrl: snapshotDataUrl,
+          rawSnapshotUrl: rawDataUrl,
         }),
       });
       if (!response.ok) {
@@ -748,6 +786,15 @@ export default function Home() {
       mapRef.current?.remove();
       mapRef.current = null;
       markerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (snapshotPreviewUrlRef.current) {
+        URL.revokeObjectURL(snapshotPreviewUrlRef.current);
+        snapshotPreviewUrlRef.current = null;
+      }
     };
   }, []);
 
