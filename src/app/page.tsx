@@ -58,6 +58,7 @@ export default function Home() {
   const [authReady, setAuthReady] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [zoomSupported, setZoomSupported] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
   const startCamera = async () => {
@@ -535,6 +536,7 @@ export default function Home() {
       }, 15000);
       try {
         rawSnapshotBlobRef.current = snapshot.blob;
+        setSnapshotUrl(snapshot.url);
         stopCamera();
         const image = await loadImageElement(snapshot.url);
         if (!image) {
@@ -720,6 +722,7 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUserEmail(null);
+    setMenuOpen(false);
   };
 
   const handleToggleZoom = async () => {
@@ -763,6 +766,10 @@ export default function Home() {
     setSaveError(null);
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     await startCamera();
+  };
+
+  const handleToggleMenu = () => {
+    setMenuOpen((current) => !current);
   };
 
 
@@ -874,16 +881,40 @@ export default function Home() {
             </div>
             <nav className="ml-auto flex items-center gap-4 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
               {authReady && userEmail ? (
-                <>
-                  <span className="hidden text-slate-600 md:inline">{userEmail}</span>
+                <div className="relative">
                   <button
                     type="button"
-                    onClick={handleLogout}
-                    className="hover:text-slate-900"
+                    onClick={handleToggleMenu}
+                    className="grid h-9 w-9 place-items-center rounded-full border border-slate-200 text-slate-700 transition hover:border-slate-900"
+                    aria-label="Open menu"
                   >
-                    Logout
+                    <span className="sr-only">Menu</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="block h-0.5 w-4 bg-slate-700" />
+                      <span className="block h-0.5 w-4 bg-slate-700" />
+                      <span className="block h-0.5 w-4 bg-slate-700" />
+                    </div>
                   </button>
-                </>
+                  {menuOpen ? (
+                    <div className="absolute right-0 mt-3 w-52 rounded-2xl border border-slate-200 bg-white p-4 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-600 shadow-[0_12px_30px_rgba(15,23,42,0.12)]">
+                      <p className="break-all text-[10px] text-slate-500">{userEmail}</p>
+                      <Link
+                        className="mt-3 block rounded-xl border border-slate-200 px-3 py-2 text-slate-700 hover:border-slate-900"
+                        href="/my-scans"
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        My Scans
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-left text-slate-700 hover:border-slate-900"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <>
                   <Link className="hover:text-slate-900" href="/auth/sign-in">
@@ -928,12 +959,12 @@ export default function Home() {
                   playsInline
                 />
               </div>
-              <div className="px-4 pb-4">
-                <canvas ref={canvasRef} className="hidden" />
+              <canvas ref={canvasRef} className="hidden" />
               {cameraError ? (
-                <p className="mt-4 text-sm text-amber-200">{cameraError}</p>
+                <div className="px-4 pb-4">
+                  <p className="mt-4 text-sm text-amber-200">{cameraError}</p>
+                </div>
               ) : null}
-            </div>
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
               <div className="flex flex-col gap-2">
