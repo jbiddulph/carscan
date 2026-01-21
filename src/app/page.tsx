@@ -734,6 +734,7 @@ export default function Home() {
     setVehicleData(null);
     setSaveStatus("idle");
     setSaveError(null);
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
     await startCamera();
   };
 
@@ -910,35 +911,19 @@ export default function Home() {
               )}
             </div>
             <div className="mt-6 grid gap-3 sm:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                <label className="text-xs uppercase tracking-[0.35em] text-slate-400">
-                  Manual Plate Entry
-                </label>
-                <input
-                  value={plateInput}
-                  onChange={(event) => setPlateInput(event.target.value)}
-                  placeholder="e.g. LM22 XPT"
-                  className="mt-2 w-full bg-transparent text-lg font-semibold uppercase tracking-[0.2em] text-slate-900 outline-none placeholder:text-slate-400"
-                />
-              </div>
               <div className="flex flex-col gap-2">
                 <button
                   type="button"
-                  onClick={handleDetectPlate}
+                  onClick={cameraReady ? handleDetectPlate : handleResumeCamera}
                   disabled={ocrStatus === "loading"}
                   className="h-12 w-full rounded-full bg-orange-500 text-sm font-semibold uppercase tracking-[0.3em] text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {ocrStatus === "loading" ? "Scanning..." : "Detect Plate"}
+                  {ocrStatus === "loading"
+                    ? "Scanning..."
+                    : cameraReady
+                    ? "Detect Plate"
+                    : "Resume Camera"}
                 </button>
-                {!cameraReady ? (
-                  <button
-                    type="button"
-                    onClick={handleResumeCamera}
-                    className="h-12 w-full rounded-full border border-slate-300 bg-white text-sm font-semibold uppercase tracking-[0.3em] text-slate-800 transition hover:border-slate-900"
-                  >
-                    Resume Camera
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   onClick={handleLookup}
@@ -947,6 +932,17 @@ export default function Home() {
                   Lookup DVLA
                 </button>
               </div>
+            </div>
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+              <label className="text-xs uppercase tracking-[0.35em] text-slate-400">
+                Manual Plate Entry
+              </label>
+              <input
+                value={plateInput}
+                onChange={(event) => setPlateInput(event.target.value)}
+                placeholder="e.g. LM22 XPT"
+                className="mt-2 w-full bg-transparent text-lg font-semibold uppercase tracking-[0.2em] text-slate-900 outline-none placeholder:text-slate-400"
+              />
             </div>
             {snapshotUrl ? (
               <div className="mt-6 rounded-[20px] border border-slate-200 bg-white p-4">
