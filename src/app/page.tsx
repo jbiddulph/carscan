@@ -26,6 +26,7 @@ export default function Home() {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraStartingRef = useRef(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
@@ -55,6 +56,8 @@ export default function Home() {
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
   const startCamera = async () => {
+    if (cameraStartingRef.current) return;
+    cameraStartingRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -75,6 +78,8 @@ export default function Home() {
       setCameraError(
         error instanceof Error ? error.message : "Unable to access the camera."
       );
+    } finally {
+      cameraStartingRef.current = false;
     }
   };
 
@@ -674,9 +679,19 @@ export default function Home() {
   };
 
   const handleResumeCamera = async () => {
+    stopCamera();
+    clearOcrTimeout();
+    setSnapshotUrl(null);
+    setRawSnapshotUrl(null);
     setDetectedPlate(null);
-    setOcrStatus("idle");
     setOcrError(null);
+    setOcrStatus("idle");
+    setOcrConfidence(null);
+    setLookupStatus("idle");
+    setLookupError(null);
+    setVehicleData(null);
+    setSaveStatus("idle");
+    setSaveError(null);
     await startCamera();
   };
 
