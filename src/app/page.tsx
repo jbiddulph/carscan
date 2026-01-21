@@ -52,7 +52,6 @@ export default function Home() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_KEY ?? "";
 
   const startCamera = async () => {
@@ -552,7 +551,6 @@ export default function Home() {
         if (ocrResult) {
           setDetectedPlate(ocrResult);
           setPlateInput(ocrResult);
-          setAutoScanEnabled(false);
           stopCamera();
           return;
         }
@@ -563,16 +561,6 @@ export default function Home() {
       }
     }
   };
-
-  useEffect(() => {
-    if (!autoScanEnabled || !cameraReady || ocrStatus === "loading" || detectedPlate) {
-      return;
-    }
-    const interval = window.setInterval(() => {
-      handleDetectPlate();
-    }, 1500);
-    return () => window.clearInterval(interval);
-  }, [autoScanEnabled, cameraReady, ocrStatus, detectedPlate]);
 
   const handleLookup = async () => {
     const registration = normalizePlate(detectedPlate || plateInput);
@@ -689,7 +677,6 @@ export default function Home() {
     setDetectedPlate(null);
     setOcrStatus("idle");
     setOcrError(null);
-    setAutoScanEnabled(true);
     await startCamera();
   };
 
